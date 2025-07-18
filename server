@@ -1,1 +1,1407 @@
+#include <time.h>
+#include <stdlib.h>
+#include "win_ctrl.h"
 
+int XMSET_BETOUTRATE = 20;				//抽水率
+int XMSET_QIANGFARATE = 50;				//强发库抽水
+int XMSET_OTHERRATE = 0;				//其他的一些额外抽水
+int XMSET_AIMTIMES_UNIT = 5000;			//控制分数走向的基础手数
+int XMSET_MAXBETOUT = 10000000;			//每日抽水上限值
+int XMSET_COID_LIMIT[6] = {
+	2000, 940,							//超难档
+	1500, 960,							//困难档
+	-2000, 1050							//容易档
+};
+int XMSET_NORMALTIMES_CHOICE[8] = {	//普通状态下的变档手数选项 
+	3000, 4000, 5000, 6000, 
+	1000, 2000, 3000, 4000
+};
+int XMSET_BOMBOUTRATE = 30;				//弹头鱼额外抽水率
+
+int XMSET_SIGN = 0;
+
+int XMSET_SONG_BASE = 4;					 //送分比例
+int XMSET_SHA_BASE = 6;					 //杀分比例
+int XMSET_SHA_RATE = 960;					 //杀分回报率
+int XMSET_SONG_NUM = 400;					 //送分段基础倍率
+int XMCTRL_CHARGE_RATE = 60;                //充值送分比例
+int XMSET_FALSERATE = 10;                  //假金币的比率   百分
+
+
+int set_time_rand_sign = 0;				//随机函数的初始化标志
+static int set_rand_numrange_sign = 0;
+
+
+void BYSSSetCtrlValue(int set_array[])
+{
+	int i;
+
+	XMSET_BETOUTRATE = set_array[ID_XMSET_BETOUTRATE];
+	XMSET_BOMBOUTRATE = set_array[ID_XMSET_BOMBOUTRATE];
+	XMSET_QIANGFARATE = set_array[ID_XMSET_QIANGFARATE];
+	XMSET_OTHERRATE = set_array[ID_XMSET_OTHERRATE];
+	XMSET_AIMTIMES_UNIT = set_array[ID_XMSET_AIMTIMES_UNIT];
+	XMSET_MAXBETOUT = set_array[ID_XMSET_MAXBETOUT];
+
+	XMSET_SONG_BASE = set_array[ID_XMSET_SONG_BASE];
+	XMSET_SHA_BASE = set_array[ID_XMSET_SHA_BASE];
+	XMSET_SHA_RATE = set_array[ID_XMSET_SHA_RATE];
+	XMSET_SONG_NUM = set_array[ID_XMSET_SONG_NUM];
+	XMCTRL_CHARGE_RATE = set_array[ID_XMCTRL_CHARGE_RATE];
+
+	XMSET_FALSERATE = set_array[ID_XMCTRL_FALSERATE];
+	for (i = 0; i < 6;i++)
+	{
+		XMSET_COID_LIMIT[i] = set_array[ID_XMSET_COID_LIMIT + i];
+	}
+
+	for (i = 0; i < 8; i++)
+	{
+		XMSET_NORMALTIMES_CHOICE[i] = set_array[ID_XMSET_NORMALTIMES_CHOICE + i];
+	}
+	XMSET_SIGN = 36;
+}
+
+void BYSSCtrlInit(int player_info[])
+{
+	player_info[XMCTRL_INITSIGN] = 36;
+	player_info[XMCTRL_STATE] = 0;
+	player_info[XMCTRL_BETOUTTAIL] = 0;
+	player_info[XMCTRL_BASECOIN] = 0;
+	player_info[XMCTRL_QF_BASECOIN] = 0;
+	player_info[XMCTRL_QF_NUM] = 0;
+	player_info[XMCTRL_NORMALTIMES] = 6688;
+	player_info[XMCTRL_AIMTIMS] = 0;
+	player_info[XMCTRL_DAYBETOUT] = 0;
+
+	player_info[XMCTRL_SF_BASECOIN] = 0;
+	player_info[XMCTRL_ALLCHARGE] = 0;
+	player_info[XMCTRL_UNUSEDCHARGE] = 0;
+	player_info[XMCTRL_NOWIN] = 0;
+	player_info[XMCTRL_NOWOUT] = 0;
+
+	player_info[XMCTRL_AIMIN] = 0;
+	player_info[XMCTRL_AIMOUT] = 0;
+	player_info[XMCTRL_START_BASECOIN] = 0;
+
+	player_info[XMCTRL_UNFITGUN_NUM] = 0;
+	player_info[XMCTRL_BASEGUN] = 0;
+}
+
+
+int GetRanNum(void)
+{
+	int tempnum = 0;
+	int times = 0;
+
+	if (set_time_rand_sign == 0)
+	{
+		int i;
+		srand((int)time(0));
+		set_time_rand_sign = 1;
+
+		for (i = 0; i < 100; i++)
+		{
+			if (rand() >= 100000)
+			{
+				set_rand_numrange_sign = 1;
+				break;
+			}
+		}
+	}
+
+	tempnum = rand();
+
+	if (set_rand_numrange_sign > 0)
+	{
+		tempnum = tempnum % 30000;
+	}
+	else
+	{
+		times = 0;
+		while (tempnum >= 30000)
+		{
+			times++;
+			tempnum = rand();
+
+			if (times >= 10)
+			{
+				tempnum = tempnum % 30000;
+				break;
+			}
+		}
+
+	}
+
+	return tempnum;
+}
+
+
+int GetLongRanNum(void)
+{
+	int ran1 = GetRanNum();
+	int ran2 = GetRanNum();
+
+	int ran = (ran1 % 10000) * 10000 + ran2%10000;
+
+	return ran;
+
+}
+
+void BYSSGameSetCtrlAim(int nowgun, int playerinfo[])
+{
+	int songbeinum = XMSET_SONG_NUM;
+	int shabeinum = 0;
+	int shasong_sign = 0;
+	int temprate[] = {
+		100, 50, 60, 90, 150, 120, 130, 100
+	};
+
+	if (playerinfo[XMCTRL_AIMIN] > playerinfo[XMCTRL_AIMOUT])
+	{
+		shasong_sign = 1;
+	}
+	else
+	{
+		shasong_sign = 0;
+	}
+
+	if (playerinfo[XMCTRL_STATE] >= 2 && playerinfo[XMCTRL_BASECOIN] >= playerinfo[XMCTRL_START_BASECOIN])
+	{
+		shasong_sign = 0;
+	}
+
+	if (playerinfo[XMCTRL_NOWIN] >= playerinfo[XMCTRL_AIMIN] && playerinfo[XMCTRL_NOWOUT] >= playerinfo[XMCTRL_AIMOUT])
+	{
+		playerinfo[XMCTRL_NOWIN] = playerinfo[XMCTRL_NOWIN] - playerinfo[XMCTRL_AIMIN];
+		playerinfo[XMCTRL_NOWOUT] = playerinfo[XMCTRL_NOWOUT] - playerinfo[XMCTRL_AIMOUT];
+	}
+
+	playerinfo[XMCTRL_BASEGUN] = nowgun;
+
+	if (shasong_sign == 0)
+	{
+		shabeinum = (1000 * (XMSET_SONG_BASE + 1)*XMSET_SONG_NUM - XMSET_SHA_RATE * XMSET_SONG_BASE *XMSET_SONG_NUM) / (XMSET_SHA_RATE*XMSET_SHA_BASE - 1000 * (XMSET_SHA_BASE - 1));
+		shabeinum = shabeinum * temprate[GetRanNum() % 8] / 100;
+		playerinfo[XMCTRL_AIMIN] = shabeinum * nowgun * XMSET_SHA_BASE;
+		playerinfo[XMCTRL_AIMOUT] = shabeinum * nowgun * (XMSET_SHA_BASE - 1);
+	}
+	else
+	{
+		songbeinum = songbeinum * temprate[GetRanNum() % 8] / 100;
+		playerinfo[XMCTRL_AIMIN] = songbeinum * nowgun * XMSET_SONG_BASE;
+		playerinfo[XMCTRL_AIMOUT] = songbeinum * nowgun * (XMSET_SONG_BASE + 1);
+	}
+}
+
+//获取玩家的控制标志
+//函数返回值，0 普通，1 容易，2 困难，3 超难
+//int player_info[]控制参数
+//int max_gun  玩家解锁的最高炮倍
+//int now_gun  玩家当前使用的炮倍
+int BYSSGetWinflg(int player_info[], int max_gun, int now_gun, int total_fire_times, int bullet_type)
+{
+	int ran_choice = 0;
+	int tempnum = 0;
+	int winflg = 0;
+	int let_win_num = 0;
+
+	//如果控制数据没有初始化，进行初始化
+	if (36 != player_info[XMCTRL_INITSIGN])
+	{
+		BYSSCtrlInit(player_info);
+	}
+	if (player_info[XMCTRL_FALSECOININIT] != 0xcfde)
+	{
+		player_info[XMCTRL_FALSECOININIT] = 0xcfde;
+		player_info[XMCTRL_FALSECOIN] = 0;
+	}
+
+	if (player_info[XMCTRL_UNUSEDCHARGE] > 0)
+	{
+		let_win_num = player_info[XMCTRL_UNUSEDCHARGE] * 5000 * XMCTRL_CHARGE_RATE / 100;
+		player_info[XMCTRL_UNUSEDCHARGE] = 0;
+		
+		
+		if (let_win_num > now_gun*100)
+		{
+			player_info[XMCTRL_BASECOIN] -= let_win_num - now_gun * 100;
+
+			if (player_info[XMCTRL_STATE] > 1)
+			{
+				player_info[XMCTRL_AIMOUT] += 100 * now_gun;
+			}
+			else
+				player_info[XMCTRL_QF_BASECOIN] += 100 * now_gun;
+		}
+		else
+		{
+			if (player_info[XMCTRL_STATE] > 1)
+			{
+				player_info[XMCTRL_AIMOUT] += 100 * now_gun;
+			}
+			else
+				player_info[XMCTRL_QF_BASECOIN] += let_win_num;
+		}
+
+		if (player_info[XMCTRL_STATE] > 1)
+		{
+			player_info[XMCTRL_STATE] = 0;
+			player_info[XMCTRL_NORMALTIMES] = XMSET_NORMALTIMES_CHOICE[GetRanNum() % 8];
+		}
+	}
+
+	if (player_info[XMCTRL_STATE] < 2 && player_info[XMCTRL_BASECOIN] > 880000 && player_info[XMCTRL_ALLCHARGE] < 100)
+	{
+		ran_choice = GetRanNum() % 8 + 1;
+		player_info[XMCTRL_STATE] = 2;
+		player_info[XMCTRL_AIMCOIN] = player_info[XMCTRL_BASECOIN] - (player_info[XMCTRL_BASECOIN] - XMSET_COID_LIMIT[4] * max_gun) / 8 * ran_choice;
+		player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice / 2;
+		player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+		player_info[XMCTRL_UNFITGUN_NUM] = 0;
+		player_info[XMCTRL_NOWIN] = 0;
+		player_info[XMCTRL_NOWOUT] = 0;
+		player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+		BYSSGameSetCtrlAim(now_gun, player_info);
+	}
+
+	if (player_info[XMCTRL_STATE] < 2 && player_info[XMCTRL_BASECOIN] > 6880000 && player_info[XMCTRL_ALLCHARGE] < 500)
+	{
+		ran_choice = GetRanNum() % 8 + 1;
+		player_info[XMCTRL_STATE] = 2;
+		player_info[XMCTRL_AIMCOIN] = player_info[XMCTRL_BASECOIN] - (player_info[XMCTRL_BASECOIN] - XMSET_COID_LIMIT[4] * max_gun) / 8 * ran_choice;
+		player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice / 2;
+		player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+		player_info[XMCTRL_UNFITGUN_NUM] = 0;
+		player_info[XMCTRL_NOWIN] = 0;
+		player_info[XMCTRL_NOWOUT] = 0;
+		player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+		BYSSGameSetCtrlAim(now_gun, player_info);
+	}
+
+	if (0 == player_info[XMCTRL_STATE])
+	{
+		player_info[XMCTRL_NORMALTIMES]--;
+		if (bullet_type == 1)
+		{
+			player_info[XMCTRL_NORMALTIMES]--;
+		}
+		else if (bullet_type == 2)
+		{
+			player_info[XMCTRL_NORMALTIMES]-=3;
+		}
+
+		if (player_info[XMCTRL_BASECOIN] >= XMSET_COID_LIMIT[0] * max_gun && player_info[XMCTRL_BASECOIN] >= 300000)
+		{
+			ran_choice = GetRanNum() % 8 + 1;
+			player_info[XMCTRL_STATE] = 3;
+			tempnum = (XMSET_COID_LIMIT[0] - XMSET_COID_LIMIT[4])*max_gun / 8;
+			player_info[XMCTRL_AIMCOIN] = player_info[XMCTRL_BASECOIN] - tempnum*ran_choice;
+			player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice;
+			player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+			player_info[XMCTRL_UNFITGUN_NUM] = 0;
+			player_info[XMCTRL_NOWIN] = 0;
+			player_info[XMCTRL_NOWOUT] = 0;
+			player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+			BYSSGameSetCtrlAim(now_gun, player_info);
+			winflg = 3;
+		}
+		else if (player_info[XMCTRL_BASECOIN] >= XMSET_COID_LIMIT[2] * max_gun && player_info[XMCTRL_BASECOIN] >= 200000)
+		{
+			ran_choice = GetRanNum() % 8 + 1;
+			player_info[XMCTRL_STATE] = 2;
+			tempnum = (XMSET_COID_LIMIT[2] - XMSET_COID_LIMIT[4])*max_gun / 8;
+			player_info[XMCTRL_AIMCOIN] = player_info[XMCTRL_BASECOIN] - tempnum*ran_choice;
+			player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice;
+			player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+			player_info[XMCTRL_UNFITGUN_NUM] = 0;
+			player_info[XMCTRL_NOWIN] = 0;
+			player_info[XMCTRL_NOWOUT] = 0;
+			player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+			BYSSGameSetCtrlAim(now_gun, player_info);
+
+			winflg = 2;
+		}
+		else if (player_info[XMCTRL_BASECOIN] <= XMSET_COID_LIMIT[4] * max_gun)
+		{
+			ran_choice = GetRanNum() % 8 + 1;
+			player_info[XMCTRL_STATE] = 1;
+			tempnum = (XMSET_COID_LIMIT[2] - XMSET_COID_LIMIT[4])*max_gun / 8;
+			player_info[XMCTRL_AIMCOIN] = player_info[XMCTRL_BASECOIN] + tempnum*ran_choice;
+			player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice;
+			player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+			player_info[XMCTRL_UNFITGUN_NUM] = 0;
+
+			winflg = 1;
+		}
+		else
+		{
+			if (player_info[XMCTRL_NORMALTIMES] <= 0)
+			{
+				if (total_fire_times < 8000)
+				{
+					player_info[XMCTRL_STATE] = 2;
+					player_info[XMCTRL_AIMCOIN] = -250000;
+					player_info[XMCTRL_AIMTIMS] = 20000;
+					player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+					player_info[XMCTRL_UNFITGUN_NUM] = 0;
+					player_info[XMCTRL_NOWIN] = 0;
+					player_info[XMCTRL_NOWOUT] = 0;
+					player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+					BYSSGameSetCtrlAim(now_gun, player_info);
+					winflg = 2;
+				}
+				else if (GetRanNum() % 100 < 55)
+				{
+					ran_choice = GetRanNum() % 8 + 1;
+					player_info[XMCTRL_STATE] = 2;
+					player_info[XMCTRL_AIMCOIN] = player_info[XMCTRL_BASECOIN] - (player_info[XMCTRL_BASECOIN] - XMSET_COID_LIMIT[4] * max_gun) / 8 * ran_choice;
+					player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice / 2;
+					player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+					player_info[XMCTRL_UNFITGUN_NUM] = 0;
+					player_info[XMCTRL_NOWIN] = 0;
+					player_info[XMCTRL_NOWOUT] = 0;
+					player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+					BYSSGameSetCtrlAim(now_gun, player_info);
+					winflg = 2;
+				}
+				else
+				{
+					ran_choice = GetRanNum() % 8 + 1;
+					player_info[XMCTRL_STATE] = 1;
+					player_info[XMCTRL_AIMCOIN] = (XMSET_COID_LIMIT[2] * max_gun - player_info[XMCTRL_BASECOIN]) / 8 * ran_choice + player_info[XMCTRL_BASECOIN];
+					player_info[XMCTRL_AIMTIMS] = XMSET_AIMTIMES_UNIT * ran_choice / 2;
+					player_info[XMCTRL_START_BASECOIN] = player_info[XMCTRL_BASECOIN];
+					player_info[XMCTRL_UNFITGUN_NUM] = 0;
+
+					winflg = 1;
+				}
+			}
+			else
+			{
+				winflg = 0;
+			}
+		}
+	}
+	else if (1 == player_info[XMCTRL_STATE])
+	{
+		player_info[XMCTRL_AIMTIMS]--;
+		player_info[XMCTRL_UNFITGUN_NUM]++;
+		if (bullet_type == 1)
+		{
+			player_info[XMCTRL_NORMALTIMES]--;
+			player_info[XMCTRL_UNFITGUN_NUM]++;
+		}
+		else if (bullet_type == 2)
+		{
+			player_info[XMCTRL_NORMALTIMES] -= 3;
+			player_info[XMCTRL_UNFITGUN_NUM]+=3;
+		}
+
+		if (player_info[XMCTRL_AIMTIMS] <= 0 || player_info[XMCTRL_BASECOIN] >= player_info[XMCTRL_AIMCOIN])
+		{
+			winflg = 0;
+			player_info[XMCTRL_STATE] = 0;
+			player_info[XMCTRL_NORMALTIMES] = XMSET_NORMALTIMES_CHOICE[GetRanNum() % 8];
+		}
+		else if (player_info[XMCTRL_UNFITGUN_NUM] >= 3000 && player_info[XMCTRL_BASECOIN] <= player_info[XMCTRL_START_BASECOIN])
+		{
+			player_info[XMCTRL_STATE] = 4;
+			player_info[XMCTRL_AIMTIMS] += player_info[XMCTRL_UNFITGUN_NUM];
+			winflg = 1;
+		}
+		else if (player_info[XMCTRL_AIMTIMS] <= player_info[XMCTRL_UNFITGUN_NUM] && player_info[XMCTRL_BASECOIN] <= player_info[XMCTRL_AIMCOIN] / 4 + 3 * player_info[XMCTRL_START_BASECOIN] / 4)
+		{
+			player_info[XMCTRL_STATE] = 4;
+			player_info[XMCTRL_AIMTIMS] += player_info[XMCTRL_UNFITGUN_NUM];
+			winflg = 1;
+		}
+		else
+		{
+			winflg = 1;
+		}
+	}
+	else if (4 == player_info[XMCTRL_STATE])
+	{
+		player_info[XMCTRL_AIMTIMS]--;
+		if (bullet_type == 1)
+		{
+			player_info[XMCTRL_NORMALTIMES]--;
+		}
+		else if (bullet_type == 2)
+		{
+			player_info[XMCTRL_NORMALTIMES] -= 3;
+		}
+
+
+		if (player_info[XMCTRL_AIMTIMS] <= 0 || player_info[XMCTRL_BASECOIN] >= player_info[XMCTRL_AIMCOIN])
+		{
+			winflg = 0;
+			player_info[XMCTRL_STATE] = 0;
+			player_info[XMCTRL_NORMALTIMES] = XMSET_NORMALTIMES_CHOICE[GetRanNum() % 8];
+		}
+		else
+		{
+			winflg = 1;
+		}
+	}
+	else if (2 == player_info[XMCTRL_STATE])
+	{
+		player_info[XMCTRL_AIMTIMS]--;
+		if (bullet_type == 1)
+		{
+			player_info[XMCTRL_NORMALTIMES]--;
+		}
+		else if (bullet_type == 2)
+		{
+			player_info[XMCTRL_NORMALTIMES] -= 3;
+		}
+
+		if (player_info[XMCTRL_AIMTIMS] <= 0 || player_info[XMCTRL_BASECOIN] <= player_info[XMCTRL_AIMCOIN])
+		{
+			winflg = 0;
+			player_info[XMCTRL_STATE] = 0;
+			player_info[XMCTRL_NORMALTIMES] = XMSET_NORMALTIMES_CHOICE[GetRanNum() % 8];
+		}
+		else if (player_info[XMCTRL_BASECOIN] >= 4*XMSET_COID_LIMIT[0] * max_gun/3 && player_info[XMCTRL_BASECOIN] >= 300000)
+		{
+			winflg = 3;
+			player_info[XMCTRL_STATE] = 3;
+		}
+		else
+		{
+			winflg = 2;
+		}
+	}
+	else
+	{
+		player_info[XMCTRL_AIMTIMS]--;
+		if (bullet_type == 1)
+		{
+			player_info[XMCTRL_NORMALTIMES]--;
+		}
+		else if (bullet_type == 2)
+		{
+			player_info[XMCTRL_NORMALTIMES] -= 3;
+		}
+
+		if (player_info[XMCTRL_AIMTIMS] <= 0 || player_info[XMCTRL_BASECOIN] <= player_info[XMCTRL_AIMCOIN])
+		{
+			winflg = 0;
+			player_info[XMCTRL_STATE] = 0;
+			player_info[XMCTRL_NORMALTIMES] = XMSET_NORMALTIMES_CHOICE[GetRanNum() % 8];
+		}
+		else
+		{
+			winflg = 3;
+		}
+	}
+
+	return winflg;
+}
+
+
+//通过权重和出现控制，获得随机结果
+static int GetWeightRusult(int quanzhong[], int resultsign[], int num)
+{
+	int tempall = 0;
+	int abc = 10000;
+	int i;
+	int tempresult[16];
+	int tempran;
+	int sign = 0;
+
+	for (i = 0; i < num; i++)
+	{
+		if (resultsign[i] > 0)
+		{
+			sign = 1;
+			break;
+		}
+	}
+
+	if (sign == 0)
+	{
+		for (i = 0; i < num; i++)
+			resultsign[i] = 1;
+	}
+
+	for (i = 0; i < num; i++)
+	{
+		if (resultsign[i] > 0)
+		{
+			tempresult[i] = quanzhong[i];
+		}
+		else
+			tempresult[i] = 0;
+
+		tempall += tempresult[i];
+
+	}
+
+	for (i = 1; i < num; i++)
+	{
+		tempresult[i] = tempresult[i - 1] + tempresult[i];
+	}
+
+	if (tempall == 0)
+	{
+		tempall = tempall;
+	}
+
+	tempran = GetRanNum() % tempall;
+
+	for (i = 0; i < num; i++)
+	{
+		if (tempran < tempresult[i] && resultsign[i] && quanzhong[i] > 0)
+		{
+			return i;
+		}
+	}
+
+	return 0;
+}
+
+int GetBigbombfishFourNum(int superbombfishtype)
+{
+	int j;
+	int onenum = 0;
+	int nownum;
+	int numrate3000[] = { 130, 280, 150, 250, 120, 70, 30, 20, 10, 10 }; //3000
+	int numrate2500[] = { 160, 310, 170, 150, 100, 50, 20, 5, 0, 0 };    //2500
+	int numrate2000[] = { 200, 420, 290, 80, 40, 20, 10, 0, 0, 0 };    //2000
+	int numrate1500[] = { 200, 500, 110, 30, 0, 0, 0, 0, 0, 0 };    //1500
+	int *numrate;
+	int numrate2[] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 };
+	int numsign[10];
+
+	for (j = 0; j < 10; j++)
+	{
+		numsign[j] = 1;
+	}
+	if (superbombfishtype == 3)
+	{
+		numrate = numrate3000;
+	}
+	else if (superbombfishtype == 1)
+	{
+		numrate = numrate2000;
+	}
+	else if (superbombfishtype == 2)
+	{
+		numrate = numrate2500;
+	}
+	else
+		numrate = numrate1500;
+
+	nownum = GetWeightRusult(numrate, numsign, 10);
+	onenum += nownum;
+	numsign[nownum] = 0;
+
+	if (onenum == 0)
+	{
+		int tempnumsign[] = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+		nownum = GetWeightRusult(numrate2, tempnumsign, 10);
+		onenum += nownum;
+		numsign[nownum] = 0;
+		for (j = 0; j < 2; j++)
+		{
+			onenum = onenum * 10;
+			nownum = GetWeightRusult(numrate2, numsign, 10);
+			onenum += nownum;
+			numsign[nownum] = 0;
+		}
+	}
+	else
+	{
+		for (j = 0; j < 3; j++)
+		{
+			onenum = onenum * 10;
+			nownum = GetWeightRusult(numrate2, numsign, 10);
+			onenum += nownum;
+			numsign[nownum] = 0;
+		}
+	}
+
+
+	return onenum;
+}
+
+
+int BYSSRealCheckDead(int playerinfo[], int nowgun, int fishscore,int fishrealscore,int bullettype)
+{
+	int deadsign = 0;
+	int tempout = nowgun * fishrealscore;
+	int rannum = GetRanNum() % 10000;
+	int bulletpower = 1;
+
+	if (bullettype == 1)
+	{
+		bulletpower = 2;
+	}
+	else if (bullettype == 2)
+	{
+		bulletpower = 4;
+	}
+
+	if (playerinfo[XMCTRL_AIMIN]>12000 * playerinfo[XMCTRL_BASEGUN] || playerinfo[XMCTRL_AIMOUT]>12000 * playerinfo[XMCTRL_BASEGUN] || playerinfo[XMCTRL_AIMIN]>12000 * playerinfo[XMCTRL_BASEGUN] || playerinfo[XMCTRL_AIMIN] <= 0 || playerinfo[XMCTRL_AIMOUT] <= 0 || playerinfo[XMCTRL_AIMIN] >= playerinfo[XMCTRL_AIMOUT] * 2 || playerinfo[XMCTRL_AIMIN] * 2 <= playerinfo[XMCTRL_AIMOUT])
+	{
+		playerinfo[XMCTRL_NOWIN] = 0;
+		playerinfo[XMCTRL_NOWOUT] = 0;
+		playerinfo[XMCTRL_START_BASECOIN] = playerinfo[XMCTRL_BASECOIN];
+		playerinfo[XMCTRL_UNFITGUN_NUM] = 0;
+		BYSSGameSetCtrlAim(nowgun, playerinfo);
+	}
+
+	if (nowgun < playerinfo[XMCTRL_BASEGUN]/3)
+	{
+		playerinfo[XMCTRL_UNFITGUN_NUM]++;
+
+		if (playerinfo[XMCTRL_UNFITGUN_NUM] >= 1000)
+		{
+			playerinfo[XMCTRL_NOWIN] = 0;
+			playerinfo[XMCTRL_NOWOUT] = 0;
+			BYSSGameSetCtrlAim(nowgun, playerinfo);
+		}
+
+		if (playerinfo[XMCTRL_STATE] == 0)
+		{
+			if (rannum < (10000 - XMSET_BETOUTRATE * 10) * bulletpower / fishscore)
+				deadsign = 1;
+		}
+		else if (playerinfo[XMCTRL_STATE] == 1)
+		{
+			if (rannum < XMSET_COID_LIMIT[5] * 10 * bulletpower / fishscore)
+				deadsign = 1;
+		}
+		else
+		{
+			if (rannum < XMSET_COID_LIMIT[3] * 10 * bulletpower / fishscore)
+				deadsign = 1;
+		}
+		return deadsign;
+	}
+	else
+	{
+		playerinfo[XMCTRL_UNFITGUN_NUM] = 0;
+	}
+
+	if (nowgun >= playerinfo[XMCTRL_BASEGUN] * 3)
+	{
+		playerinfo[XMCTRL_AIMOUT] *= nowgun / playerinfo[XMCTRL_BASEGUN];
+		playerinfo[XMCTRL_AIMIN] *= nowgun / playerinfo[XMCTRL_BASEGUN];
+		playerinfo[XMCTRL_BASEGUN] = nowgun;
+	}
+
+	if (playerinfo[XMCTRL_NOWIN] >= playerinfo[XMCTRL_AIMIN] && playerinfo[XMCTRL_NOWOUT] >= playerinfo[XMCTRL_AIMOUT])
+	{
+		BYSSGameSetCtrlAim(nowgun, playerinfo);
+	}
+
+	
+	if (playerinfo[XMCTRL_NOWIN] < playerinfo[XMCTRL_AIMIN] * 2 / 3)
+	{
+		if (playerinfo[XMCTRL_NOWOUT] + tempout < playerinfo[XMCTRL_AIMOUT] && (playerinfo[XMCTRL_AIMIN] - playerinfo[XMCTRL_NOWIN]) * 10 / (playerinfo[XMCTRL_AIMOUT] - playerinfo[XMCTRL_NOWOUT] - tempout) < 19)
+		{
+			if (playerinfo[XMCTRL_NOWIN] < 88 * nowgun)
+			{
+				if (playerinfo[XMCTRL_STATE] == 1)
+				{
+					if (rannum < 10500 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+				else
+				{
+					if (rannum < 9500 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+
+			}
+			else
+			{
+				if (playerinfo[XMCTRL_AIMOUT] > playerinfo[XMCTRL_AIMIN])
+				{
+					if (rannum < 10600 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+				else
+				{
+					if (rannum < 9300 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+
+			}
+		}
+	}
+	else if (playerinfo[XMCTRL_NOWIN] < playerinfo[XMCTRL_AIMIN])
+	{
+		if (playerinfo[XMCTRL_NOWIN] + 20 * nowgun >= playerinfo[XMCTRL_AIMIN])
+		{
+			if (playerinfo[XMCTRL_NOWOUT] + playerinfo[XMCTRL_AIMIN] + tempout <= playerinfo[XMCTRL_NOWIN] + playerinfo[XMCTRL_AIMOUT] + 8 * nowgun)
+			{
+
+				if (fishscore > 248)
+				{
+					if (rannum < (40000 + 10000*(bulletpower-1)) / fishscore)
+						deadsign = 1;
+				}
+				else if (fishscore > 138)
+				{
+					if (rannum < (30000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else if (fishscore > 48)
+				{
+					if (rannum < (16000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else
+				{
+					if (rannum < 11000 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+
+			}
+		}
+		else
+		{
+			if (playerinfo[XMCTRL_NOWOUT] + tempout < playerinfo[XMCTRL_NOWIN] * (20 * playerinfo[XMCTRL_AIMOUT] / playerinfo[XMCTRL_AIMIN]) / 20)
+			{
+				if (fishscore > 248)
+				{
+					if (rannum < (40000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else if (fishscore > 48)
+				{
+					if (rannum < (30000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else if (fishscore > 10)
+				{
+					if (rannum < (12000 + 10000*(bulletpower-1)) / fishscore)
+						deadsign = 1;
+				}
+				else
+				{
+					if (rannum < 10000 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+			}
+			else if (playerinfo[XMCTRL_NOWOUT] + tempout + 100 * nowgun < playerinfo[XMCTRL_NOWIN] * (20 * playerinfo[XMCTRL_AIMOUT] / playerinfo[XMCTRL_AIMIN]) / 20)
+			{
+				if (fishscore > 248)
+				{
+					if (rannum < (50000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else if (fishscore > 48)
+				{
+					if (rannum < (30000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else if (fishscore > 10)
+				{
+					if (rannum < (12000 + 10000 * (bulletpower - 1)) / fishscore)
+						deadsign = 1;
+				}
+				else
+				{
+					if (rannum < 10000 * bulletpower / fishscore)
+						deadsign = 1;
+				}
+			}
+			else if (playerinfo[XMCTRL_NOWOUT] + tempout < playerinfo[XMCTRL_AIMOUT] && (playerinfo[XMCTRL_AIMIN] - playerinfo[XMCTRL_NOWIN]) * 10 / (playerinfo[XMCTRL_AIMOUT] - playerinfo[XMCTRL_NOWOUT] - tempout) < 25)
+			{
+
+				if (rannum < 10000 * bulletpower / fishscore)
+					deadsign = 1;
+			}
+		}
+	}
+
+
+	else
+	{
+
+		if (playerinfo[XMCTRL_NOWOUT] + tempout + playerinfo[XMCTRL_AIMIN] <= playerinfo[XMCTRL_AIMOUT] + playerinfo[XMCTRL_NOWIN])
+		{
+			if (fishscore > 248)
+			{
+				if (rannum < 50000 * bulletpower / fishscore)
+					deadsign = 1;
+			}
+			else if (fishscore > 138)
+			{
+				if (rannum < 30000 * bulletpower / fishscore)
+					deadsign = 1;
+			}
+			else if (fishscore > 48)
+			{
+				if (rannum < 20000 * bulletpower / fishscore)
+					deadsign = 1;
+			}
+			else if (fishscore > 10)
+			{
+				if (rannum < 12000 * bulletpower / fishscore)
+					deadsign = 1;
+			}
+			else
+			{
+				if (rannum < 11000 * bulletpower / fishscore)
+					deadsign = 1;
+			}
+		}
+	}
+
+	return deadsign;
+}
+
+int Getfishrate(int playerinfo[],int fishscore)
+{
+	int fishrate_ss;
+
+	if (playerinfo[XMCTRL_NOWIN] < playerinfo[XMCTRL_AIMIN] * 3 / 4)
+	{
+		if (playerinfo[XMCTRL_AIMIN] > playerinfo[XMCTRL_AIMOUT])
+		{
+			fishrate_ss = (XMSET_SHA_BASE - 1) * 1000000 / XMSET_SHA_BASE;
+		}
+		else
+		{
+			if (fishscore < 20)
+			{
+				fishrate_ss = 1050000;
+			}
+			else
+			{
+				fishrate_ss = (XMSET_SONG_BASE + 1) * 1000000 / XMSET_SONG_BASE + 100000;
+			}
+		}
+	}
+	else if (playerinfo[XMCTRL_NOWIN] < playerinfo[XMCTRL_AIMIN])
+	{
+		fishrate_ss = 100 * (playerinfo[XMCTRL_AIMOUT] - playerinfo[XMCTRL_NOWOUT]) / (playerinfo[XMCTRL_AIMIN] - playerinfo[XMCTRL_NOWIN]);
+		fishrate_ss *= 10000;
+
+		if (fishrate_ss > 5000000)
+		{
+			fishrate_ss = 5000000;
+		}
+
+		if (fishscore < 20 && fishrate_ss > 1100000)
+		{
+			fishrate_ss = 1100000;
+		}
+	}
+	else
+	{
+		if (fishscore < 20)
+		{
+			fishrate_ss = 1100000;
+		}
+		else
+			fishrate_ss = 2000000;
+	}
+
+	return fishrate_ss;
+}
+
+
+int BYSSCheckFishDead(int player_info[], int max_gun, int now_gun, int fish_score, int fish_type, int bomb_fish_type, int total_fire_times, int bullet_type, int fishrealscore,int fishoutrate[],int superbombfishtype)
+{
+	int win_flg = BYSSGetWinflg(player_info, max_gun, now_gun, total_fire_times, bullet_type);
+	int win_rate[] = { 
+		1000 - XMSET_BETOUTRATE - XMSET_QIANGFARATE - XMSET_OTHERRATE,
+		XMSET_COID_LIMIT[5] - XMSET_QIANGFARATE - XMSET_OTHERRATE,
+		XMSET_COID_LIMIT[3] - XMSET_QIANGFARATE - XMSET_OTHERRATE,
+		XMSET_COID_LIMIT[1] - XMSET_QIANGFARATE - XMSET_OTHERRATE
+	};
+	int ran = GetLongRanNum() % 1000000;
+	int win_sign = 0;
+	int qiangfa_num = 0;
+	int cs_times = 0;
+	int new_player_adding_rate = 0;
+	int bomb_outrate = 0;
+	int qiangfa_basenum = 20;
+	int fishrate_ss = 0;
+
+	if (0 == XMSET_SIGN)
+		return -1;
+
+	//弹头额外抽水
+	if (bomb_fish_type > 0)
+	{
+		bomb_outrate = XMSET_BOMBOUTRATE;
+	}
+	
+	if (player_info[XMCTRL_FALSECOIN] >= now_gun && (bomb_fish_type == 1 || bomb_fish_type == 3))
+	{
+		int usecoin = now_gun;
+
+		if (bullet_type == 1)
+		{
+			usecoin *= 2;
+		}
+		else if (bullet_type == 2)
+		{
+			usecoin *= 4;
+		}
+
+		if (player_info[XMCTRL_FALSECOIN] >= usecoin && GetRanNum() % 100 < XMSET_FALSERATE)
+		{
+			player_info[XMCTRL_FALSECOIN] -= usecoin;
+
+			return 0;
+		}		
+	}
+
+	if ((bomb_fish_type == 1 || bomb_fish_type == 3) && fishrealscore >= 300)
+	{
+		fish_score = fishrealscore;
+		win_rate[win_flg] += XMSET_QIANGFARATE;
+		win_rate[win_flg] -= bomb_outrate;
+		/*
+		if (player_info[XMCTRL_STATE] == 4)
+		{
+			win_rate[win_flg] += 300;
+			if (fish_score > 999)
+			{
+				win_rate[win_flg] += 700;
+			}
+		}*/
+
+		if (1 == bullet_type)
+			win_rate[win_flg] *= 2;
+		if (2 == bullet_type)
+			win_rate[win_flg] *= 4;
+
+		if (ran < (win_rate[win_flg] * 1000) / fish_score)
+		{
+			win_sign = 1;
+		}
+
+		fishoutrate[0] = win_rate[win_flg]*1000;
+
+		player_info[XMCTRL_BASECOIN] -= now_gun;
+		if (1 == bullet_type)
+			player_info[XMCTRL_BASECOIN] -= now_gun;
+		if (2 == bullet_type)
+			player_info[XMCTRL_BASECOIN] -= 3 * now_gun;
+
+		if (1 == win_sign)
+		{
+			player_info[XMCTRL_BASECOIN] += fish_score * now_gun;
+			player_info[XMCTRL_BETOUTTAIL] += fish_score * now_gun;
+			cs_times = player_info[XMCTRL_BETOUTTAIL] / 1000;
+			player_info[XMCTRL_BETOUTTAIL] = player_info[XMCTRL_BETOUTTAIL] % 1000;
+			player_info[XMCTRL_BASECOIN] += (XMSET_BETOUTRATE + XMSET_OTHERRATE + bomb_outrate)*cs_times;
+			player_info[XMCTRL_DAYBETOUT] += XMSET_BETOUTRATE*cs_times;
+		}
+		if (bomb_fish_type == 3 && win_sign > 0)
+			win_sign = GetBigbombfishFourNum(superbombfishtype);
+
+		return win_sign;
+	}
+
+	if (player_info[XMCTRL_QF_BASECOIN] >= now_gun * qiangfa_basenum * 20)
+	{
+		player_info[XMCTRL_BASECOIN] -= player_info[XMCTRL_QF_BASECOIN];
+		player_info[XMCTRL_QF_BASECOIN] = 0;
+	}
+
+	if (player_info[XMCTRL_QF_BASECOIN] >= now_gun * qiangfa_basenum && 0 == player_info[XMCTRL_QF_NUM])
+	{
+		player_info[XMCTRL_QF_NUM] = 100 + (GetRanNum() % 100);
+	}
+
+	if (total_fire_times > 16800 && total_fire_times < 16900 && player_info[XMCTRL_STATE] < 2 && player_info[XMCTRL_BASECOIN] > -100000 && player_info[XMCTRL_ALLCHARGE] < 10)
+	{
+		player_info[XMCTRL_STATE] = 2;
+		player_info[XMCTRL_NOWIN] = 0;
+		player_info[XMCTRL_NOWOUT] = 0;
+		player_info[XMCTRL_AIMOUT] = player_info[XMCTRL_AIMIN] + 10;
+		BYSSGameSetCtrlAim(now_gun, player_info);
+		player_info[XMCTRL_AIMCOIN] = -200000;
+		player_info[XMCTRL_AIMTIMS] = 10000;
+	}
+	
+
+	if (bomb_fish_type != 1 && bomb_fish_type != 3 && player_info[XMCTRL_QF_NUM] > 0 && ((fish_score >= 50 && 0 == fish_type) || (player_info[XMCTRL_QF_BASECOIN] >= now_gun * 50)))
+	{
+		player_info[XMCTRL_QF_NUM]--;
+		player_info[XMCTRL_BASECOIN] -= now_gun;
+		player_info[XMCTRL_QF_BASECOIN] -= now_gun;
+		qiangfa_num = 1000000;
+	}
+
+	if (bomb_fish_type != 1 && bomb_fish_type != 3 && player_info[XMCTRL_SF_BASECOIN] >= now_gun && (GetRanNum() % 4) < 1)
+	{
+		qiangfa_num += 1000000;
+		player_info[XMCTRL_BASECOIN] -= now_gun;
+		player_info[XMCTRL_SF_BASECOIN] -= now_gun;
+
+		if (player_info[XMCTRL_STATE] > 1)
+			player_info[XMCTRL_NOWIN] += now_gun;
+	}
+
+	if (bomb_fish_type == 1 || bomb_fish_type == 3)
+	{
+		win_rate[win_flg] += XMSET_QIANGFARATE;
+	}
+
+	//新手保护
+	if (total_fire_times < 3600 && max_gun < 600 && player_info[XMCTRL_BASECOIN] < 100000)
+	{
+		if (fish_score < 50)
+			new_player_adding_rate = 100000;
+		else
+			new_player_adding_rate = 4000000;
+	}
+
+	if (total_fire_times < 800 && max_gun < 200 && player_info[XMCTRL_BASECOIN] < 60000)
+	{
+		if (fish_score < 50)
+			new_player_adding_rate = 200000;
+		else
+			new_player_adding_rate = 6000000;
+	}
+
+	if (total_fire_times < 200 && max_gun < 50 && player_info[XMCTRL_BASECOIN] < 30000)
+	{
+		if (fish_score < 50)
+			new_player_adding_rate = 300000;
+		else
+			new_player_adding_rate = 6000000;
+	}
+
+	if (total_fire_times < 100 && max_gun < 30 && player_info[XMCTRL_BASECOIN] < 20000)
+	{
+		if (fish_score < 50)
+			new_player_adding_rate = 300000;
+		else
+			new_player_adding_rate = 10000000;
+	}
+
+	if (total_fire_times < 30 && max_gun < 30 && player_info[XMCTRL_BASECOIN] < 10000)
+	{
+		if (fish_score < 50)
+			new_player_adding_rate = 300000;
+		else
+			new_player_adding_rate = 20000000;
+	}
+
+	if (win_flg == 1 && bomb_fish_type == 2)
+	{
+		qiangfa_num += (XMSET_COID_LIMIT[5] - 1000) * 4 * 1000;
+	}
+
+	if (fishrealscore >= 50 && player_info[XMCTRL_STATE] == 4)
+	{
+		win_rate[win_flg] += 500;
+		if (fishrealscore > 248)
+		{
+			win_rate[win_flg] += 700;
+		}
+	}
+	if (1 == bullet_type)
+	{
+		win_rate[win_flg] *= 2;
+	}
+	if (2 == bullet_type)
+	{
+		win_rate[win_flg] *= 4;
+	}
+
+
+	if (bomb_fish_type == 1)
+	{
+		fish_score = fish_score * (1000 + XMSET_BOMBOUTRATE) / 1000;
+	}
+
+	if (player_info[XMCTRL_STATE] == 2 || player_info[XMCTRL_STATE] == 3)
+	{
+		win_sign = BYSSRealCheckDead(player_info, now_gun, fish_score, fishrealscore,bullet_type);
+		fishrate_ss = Getfishrate(player_info, fish_score);
+		if (1 == bullet_type)
+		{
+			fishrate_ss += 1000000;
+		}
+		if (2 == bullet_type)
+		{
+			fishrate_ss += 3000000;
+		}
+	}
+	else
+	{
+
+		fishrate_ss = new_player_adding_rate + qiangfa_num + win_rate[win_flg] * 1000;
+
+		if (ran < (new_player_adding_rate + qiangfa_num + win_rate[win_flg] * 1000) / fish_score)
+		{
+			win_sign = 1;
+		}
+	}
+
+
+
+	fish_score = fishrealscore;
+
+
+	player_info[XMCTRL_BASECOIN] -= now_gun;
+	player_info[XMCTRL_NOWIN] += now_gun;
+
+	if (1 == bullet_type)
+	{
+		player_info[XMCTRL_BASECOIN] -= now_gun;
+		player_info[XMCTRL_NOWIN] += now_gun;
+	}
+	if (2 == bullet_type)
+	{
+		player_info[XMCTRL_BASECOIN] -= 3*now_gun;
+		player_info[XMCTRL_NOWIN] += 3*now_gun;
+	}
+
+	if (1 == win_sign)
+	{
+		int qiangfarate = XMSET_QIANGFARATE;
+
+		if (2 == bullet_type)
+			qiangfarate *= 4;
+		if (1 == bullet_type)
+			qiangfarate *= 2;
+
+		player_info[XMCTRL_NOWOUT] += fish_score * now_gun;
+		player_info[XMCTRL_BASECOIN] += fish_score * now_gun;
+		player_info[XMCTRL_BETOUTTAIL] += fish_score * now_gun;
+		cs_times = player_info[XMCTRL_BETOUTTAIL] / 1000;
+		player_info[XMCTRL_BETOUTTAIL] = player_info[XMCTRL_BETOUTTAIL] % 1000;
+
+		if (player_info[XMCTRL_DAYBETOUT] >= XMSET_MAXBETOUT)
+		{
+			if (bomb_fish_type == 1 || bomb_fish_type == 3  || player_info[XMCTRL_STATE] > 1)
+				player_info[XMCTRL_BASECOIN] += (XMSET_OTHERRATE + bomb_outrate)*cs_times;
+			else
+			{
+				player_info[XMCTRL_QF_BASECOIN] += cs_times*qiangfarate;
+				player_info[XMCTRL_BASECOIN] += (qiangfarate + XMSET_OTHERRATE + bomb_outrate)*cs_times;
+			}
+		}
+		else
+		{
+			if (bomb_fish_type == 1 || bomb_fish_type == 3)
+			{
+				player_info[XMCTRL_BASECOIN] += (XMSET_BETOUTRATE + XMSET_OTHERRATE + bomb_outrate)*cs_times;
+				player_info[XMCTRL_DAYBETOUT] += XMSET_BETOUTRATE*cs_times;
+			}
+			else
+			{
+				if (player_info[XMCTRL_STATE] < 2 || player_info[XMCTRL_STATE] == 4)
+				{
+					player_info[XMCTRL_QF_BASECOIN] += cs_times*qiangfarate;
+					player_info[XMCTRL_BASECOIN] += (qiangfarate + XMSET_BETOUTRATE + XMSET_OTHERRATE + bomb_outrate)*cs_times;
+					player_info[XMCTRL_DAYBETOUT] += XMSET_BETOUTRATE*cs_times;
+				}
+				else
+				{
+					player_info[XMCTRL_BASECOIN] += (XMSET_BETOUTRATE + XMSET_OTHERRATE + bomb_outrate)*cs_times;
+					player_info[XMCTRL_DAYBETOUT] += XMSET_BETOUTRATE*cs_times;
+				}
+			}
+		}
+	}
+
+	fishoutrate[0] = fishrate_ss;
+	if (bomb_fish_type == 3 && win_sign > 0)
+		win_sign = GetBigbombfishFourNum(superbombfishtype);
+
+	return win_sign;
+}
+
+//对玩家没有作用到鱼身上的子弹进行处理
+void BYSSSetBetin(int player_info[], int betin_coin)
+{
+	//如果控制数据没有初始化，进行初始化
+	if (36 != player_info[XMCTRL_INITSIGN])
+	{
+		BYSSCtrlInit(player_info);
+	}
+	//player_info[XMCTRL_BASECOIN] = player_info[XMCTRL_BASECOIN] - betin_coin;
+	player_info[XMCTRL_QF_BASECOIN] += betin_coin;
+}
+
+	
+//对玩家赢分进行处理
+void BYSSSetBetout(int player_info[], int betout_coin,int game_rate,int qf_rate,int other_rate)
+{
+	int cs_times = 0;
+
+	if (player_info[XMCTRL_DAYBETOUT] >= XMSET_MAXBETOUT)
+	{
+		game_rate = 0;
+	}
+
+	player_info[XMCTRL_BASECOIN] = player_info[XMCTRL_BASECOIN] + betout_coin;
+	player_info[XMCTRL_BETOUTTAIL] += betout_coin;
+	cs_times = player_info[XMCTRL_BETOUTTAIL] / 1000;
+	player_info[XMCTRL_BETOUTTAIL] = player_info[XMCTRL_BETOUTTAIL] % 1000;
+
+	player_info[XMCTRL_BASECOIN] += cs_times * (game_rate + qf_rate + other_rate);
+	player_info[XMCTRL_QF_BASECOIN] += cs_times * qf_rate;
+}
+
+void BYSSResetDayBetout(int player_info[])
+{
+	player_info[XMCTRL_DAYBETOUT] = 0;
+}
+
+
+void BYSSAddQFBasecoin(int player_info[], int qiangfa_num)
+{
+	//如果控制数据没有初始化，进行初始化
+	if (36 != player_info[XMCTRL_INITSIGN])
+	{
+		BYSSCtrlInit(player_info);
+	}
+	player_info[XMCTRL_QF_BASECOIN] += qiangfa_num;
+}
+
+//对抽奖奖池多出抽奖档位部分的处理
+//extra_lottery  多出抽奖档位的部分
+void BYSSDealwithExtraLottery(int player_info[], int extra_lottery)
+{
+	player_info[XMCTRL_BASECOIN] -= extra_lottery;
+}
+
+
+//玩家充值时调用
+//money为充值金额（元）
+void BYSSDealwithCharge(int player_info[], int money)
+{
+	//如果控制数据没有初始化，进行初始化
+	if (36 != player_info[XMCTRL_INITSIGN])
+	{
+		BYSSCtrlInit(player_info);
+	}
+	//player_info[XMCTRL_BASECOIN] -= money*10000;
+	player_info[XMCTRL_ALLCHARGE] += money;
+	player_info[XMCTRL_UNUSEDCHARGE] += money;
+
+}
+
+//玩家领救济金的时候调用
+//coin为救济金金额
+void BYSSDealwithRelief(int player_info[], int coin)
+{
+	player_info[XMCTRL_QF_BASECOIN] += coin;
+	player_info[XMCTRL_BASECOIN] += coin;
+	if (GetRanNum()%4 == 1)
+	{
+		player_info[XMCTRL_STATE] = 0;
+		player_info[XMCTRL_NORMALTIMES] = XMSET_NORMALTIMES_CHOICE[GetRanNum() % 8];
+	}
+}
+
+//int player_info[]      控制参数, 需要在数据库开辟字段存储起来，20个int的数组, 同上
+//int temp_qf_num        需要增加的强发库金币值
+//                       临时增加玩家的强发值，同时也增加了控制净分，不给玩家送分
+void BYSSAddTempQF(int player_info[], int temp_qf_num)
+{
+	//如果控制数据没有初始化，进行初始化
+	if (36 != player_info[XMCTRL_INITSIGN])
+	{
+		BYSSCtrlInit(player_info);
+	}
+
+	player_info[XMCTRL_BASECOIN] += temp_qf_num;
+	player_info[XMCTRL_SF_BASECOIN] += temp_qf_num;
+
+}
+
+int BYSSGetBombScore(int player_info[], int czgongxian[], int bombvalue)
+{
+	//int choicerate[9] = { 290,330,214,100,30,20,10,5,1};
+	
+	int choicerate[9] = { 50,280,543,100,20,3,2,1,1};
+	//int choicerate[9] = { 290, 190, 374, 100, 20, 10, 10, 5, 1 };
+	int resultchoice[] = {
+		750000,850000,
+		850000,950000,
+		950000,1050000,
+		1050000,1150000,
+		1150000,1650000,
+		1650000,2350000,
+		2350000,3650000,
+		3650000,6350000,
+		5000000,15000000,
+	};
+	int choicesign[9] = { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+	int resultnum = 0;
+	int rangenum = 0;
+	int rannum = GetLongRanNum();
+	int result = 0;
+	int addingnum = 0;
+
+	resultnum = GetWeightRusult(choicerate, choicesign, 9);
+
+	bombvalue /= 10000;
+	resultchoice[2 * resultnum] = resultchoice[2 * resultnum] * bombvalue / 100;
+	resultchoice[2 * resultnum+1] = resultchoice[2 * resultnum+1] * bombvalue / 100;
+	
+	rangenum = resultchoice[2 * resultnum + 1] - resultchoice[2 * resultnum] + 1;
+
+	result = resultchoice[2 * resultnum] + (rannum % rangenum);
+
+	//一定的概率额外送分
+	if (GetRanNum()%20 == 8)
+	{
+		if ((player_info[XMCTRL_STATE] == 1 || player_info[XMCTRL_STATE] == 4) && player_info[XMCTRL_AIMCOIN] > player_info[XMCTRL_BASECOIN])
+		{
+			addingnum = player_info[XMCTRL_AIMCOIN] - player_info[XMCTRL_BASECOIN];
+			
+			bombvalue *= 10000;
+			if (addingnum / bombvalue >= 15)
+			{
+				addingnum = bombvalue * (1 + GetRanNum() % 15);
+				result += addingnum;
+				player_info[XMCTRL_BASECOIN] += addingnum;
+			}
+		}
+		else if (czgongxian[0] > 0)
+		{
+			addingnum = czgongxian[0];
+			bombvalue *= 10000;
+			if (addingnum / bombvalue >= 15)
+			{
+				addingnum = bombvalue * (1 + GetRanNum() % 10);
+				result += addingnum;
+				czgongxian[0] -= addingnum;
+			}
+		}
+	}
+
+	return result;
+}
+
+void BYSSAddFalsecoin(int player_info[], int falsecoinnum)
+{
+	if (player_info[XMCTRL_FALSECOININIT] != 0xcfde)
+	{
+		player_info[XMCTRL_FALSECOININIT] = 0xcfde;
+		player_info[XMCTRL_FALSECOIN] = 0;
+	}
+
+	player_info[XMCTRL_FALSECOIN] += falsecoinnum;
+}
+
+//金币有一定比例是假的，假金币的比例为ID_XMCTRL_FALSERATE配置对应的值
+void BYSSAddPartFalsecoin(int player_info[], int partfalsecoinnum)
+{
+	if (player_info[XMCTRL_FALSECOININIT] != 0xcfde)
+	{
+		player_info[XMCTRL_FALSECOININIT] = 0xcfde;
+		player_info[XMCTRL_FALSECOIN] = 0;
+	}
+
+	player_info[XMCTRL_FALSECOIN] += partfalsecoinnum*XMSET_FALSERATE / 100;
+}
