@@ -1,5 +1,5 @@
 # Fishing-game-source-code   捕鱼游戏源码。捕鱼美术资源，捕鱼数值文案都可以单独出；
-出售捕鱼游戏源码，刚停服没多久，产品质量精美，代码稳定，捕鱼大厅包含多种玩法，上百种小鱼和几十个中boss；TG：@xuzongbin001； E-mail: yueb29266@gmail.com
+出售捕鱼游戏源码，刚停服没多久，产品质量精美，代码稳定，捕鱼大厅包含多种玩法，上百种小鱼和几十个中boss；TG：@xuzongbin001
 
 
 ![x1](https://github.com/user-attachments/assets/5621df48-69ac-46f9-be6a-6222d2c7a5d7)
