@@ -27,6 +27,5 @@ SOFTWARE.
 如需获得本项目的商用授权、完整未加密源码、技术支持或定制开发服务，请联系：
 
 📱 Telegram：@xuzongbin001
-📧 Email：yueb29266@gmail.com
 
-Copyright © 2026 masterai-top. All Rights Reserved.
+Copyright © 2026 taishan6868. All Rights Reserved.
